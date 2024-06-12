@@ -1,6 +1,7 @@
 import discord
 import random
-import youtube_dl
+import yt_dlp as youtube_dl
+import asyncio
 from discord.ext import commands
 
 intents = discord.Intents.default()
@@ -11,6 +12,8 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 pessoa = 383979046507249675
 emoji_macaco = "🐵"
+
+queues = {}
 
 @bot.event
 async def on_ready():
@@ -184,11 +187,11 @@ async def unmute_error(ctx, error):
 @commands.has_permissions(ban_members=True)
 async def mutefone(ctx, member: discord.Member = None):
     if member is None:
-        await ctx.send("Por favor, mencione um membro para mutar seu fone.")
+        await ctx.send("Por favor, mencione um membro para mutar o fone.")
         return
 
     await member.edit(deafen=True)
-    await ctx.send(f"{member.display_name} seu fone foi mutado.")
+    await ctx.send(f"{member.display_name} teve o fone mutado.")
 
 @mutefone.error
 async def mutefone_error(ctx, error):
@@ -199,11 +202,11 @@ async def mutefone_error(ctx, error):
 @commands.has_permissions(ban_members=True)
 async def unmutefone(ctx, member: discord.Member = None):
     if member is None:
-        await ctx.send("Por favor, mencione um membro para desmutar seu fone.")
+        await ctx.send("Por favor, mencione um membro para desmutar o fone.")
         return
 
     await member.edit(deafen=False)
-    await ctx.send(f"{member.display_name} seu fone foi desmutado.")
+    await ctx.send(f"{member.display_name} teve o fone desmutado.")
 
 @unmutefone.error
 async def unmutefone_error(ctx, error):
@@ -211,13 +214,13 @@ async def unmutefone_error(ctx, error):
         await ctx.send("Você não tem permissão para executar esse comando.")
 
 @bot.command()
-@commands.has_permissions(ban_members=True)
-async def voicekick(ctx, member: discord.Member = None):
-    if member is None:
-        await ctx.send("Por favor, mencione um membro para expulsar do canal de voz.")
+@commands.has_permissions(move_members=True)
+async def voicekick(ctx, member: discord.Member):
+    if member.voice is None:
+        await ctx.send("Esse membro não está em um canal de voz.")
         return
 
-    await member.edit(voice_channel=None)
+    await member.move_to(None)
     await ctx.send(f"{member.display_name} foi expulso do canal de voz.")
 
 @voicekick.error
@@ -228,75 +231,125 @@ async def voicekick_error(ctx, error):
 @bot.command()
 async def join(ctx):
     if ctx.author.voice is None:
-        await ctx.send("Você não está conectado a um canal de voz.")
+        await ctx.send("Você precisa estar em um canal de voz para usar esse comando.")
         return
-    
-    channel = ctx.author.voice.channel
-    await channel.connect()
-    await ctx.send(f"Conectado ao canal: {channel.name}")
 
-@bot.command()
-async def leave(ctx):
+    voice_channel = ctx.author.voice.channel
     if ctx.voice_client is None:
-        await ctx.send("Não estou conectado a nenhum canal de voz.")
-        return
-    
-    await ctx.voice_client.disconnect()
-    await ctx.send("Desconectado do canal de voz.")
+        await voice_channel.connect()
+        await ctx.send("Conectado ao canal de voz.")
+    else:
+        await ctx.voice_client.move_to(voice_channel)
+        await ctx.send("Movido para o canal de voz.")
 
-'''
+# Definição da função play_next
+async def play_next(ctx):
+    guild_id = ctx.guild.id
+    voice_client = ctx.voice_client
+
+    if guild_id in queues and queues[guild_id]:
+        audio_url = queues[guild_id].pop(0)
+        ffmpeg_options = {
+            'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+            'options': '-vn'
+        }
+        voice_client.play(discord.FFmpegPCMAudio(audio_url, **ffmpeg_options), after=lambda e: bot.loop.create_task(play_next(ctx)))
+    else:
+        await asyncio.sleep(300)
+        if guild_id in queues and not queues[guild_id] and not voice_client.is_playing():
+            await voice_client.disconnect()
+
 @bot.command()
-async def play(ctx, *, searchword):
-    voice = ctx.voice_client
+async def play(ctx, *, query):
+    if ctx.author.voice is None:
+        await ctx.send("Você precisa estar em um canal de voz para usar esse comando.")
+        return
 
-    if searchword[0:4] == "http" or searchword[0:3] == "www":
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-            'verbose': True  # Adiciona o modo verboso
-        }
-        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(searchword, download=False)
+    voice_channel = ctx.author.voice.channel
+    if ctx.voice_client is None:
+        await voice_channel.connect()
+        await ctx.send("Conectado ao canal de voz.")
+
+    guild_id = ctx.guild.id
+    voice_client = ctx.voice_client
+
+    # Verifica se a entrada é uma URL ou um título de música
+    if "youtube.com" in query or "youtu.be" in query:
+        url = query
     else:
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-            'default_search': 'ytsearch',
-            'verbose': True  # Adiciona o modo verboso
-        }
-        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(searchword, download=False)['entries'][0]
-
-    title = info['title']
-    url = info["webpage_url"]
-    
-    ydl_opts["outtmpl"] = f"{title}.mp3"
-
-    with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([url])
-
-    if voice.is_playing():
-        queue.append(title)
-        await ctx.send(f"{title} foi adicionado à fila.")
-    else:
-        voice.play(discord.FFmpegPCMAudio(f"{title}.mp3"), after=lambda e: check_queue())
-        await ctx.send(f"Tocando {title}")
-        
-    def check_queue():
+        # Se for um título de música, pesquisa no YouTube
         try:
-            if queuelist[0] != None:
-                voice.play(discord.FFmpegPCMAudio(f"{queuelist[0]}.mp3"), after=lambda e: check_queue())
-                queuelist.pop(0)
-        except IndexError:
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'quiet': True,
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': '192',
+                }]
+            }
+            # Pesquisa no YouTube pelo título fornecido
+            search_query = f"ytsearch1:{query}"
+            with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(search_query, download=False)
+                url = info['entries'][0]['url']  # Pega o link da primeira entrada dos resultados
+
+        except youtube_dl.utils.DownloadError:
+            await ctx.send("Ocorreu um erro ao tentar extrair a URL do vídeo. Certifique-se de que o título está correto.")
             return
-'''
-            
+
+    if guild_id not in queues:
+        queues[guild_id] = []
+
+    queues[guild_id].append(url)
+
+    if not voice_client.is_playing():
+        await play_next(ctx)
+
+@bot.command()
+async def skip(ctx):
+    if ctx.voice_client is not None:
+        ctx.voice_client.stop()
+        await play_next(ctx)
+
+@bot.command()
+async def pause(ctx):
+    if ctx.voice_client.is_playing():
+        ctx.voice_client.pause()
+
+@bot.command()
+async def resume(ctx):
+    if ctx.voice_client.is_paused():
+        ctx.voice_client.resume()
+
+@bot.command()
+async def stop(ctx):
+    if ctx.voice_client.is_playing():
+        ctx.voice_client.stop()
+
+@bot.command()
+async def queue(ctx):
+    guild_id = ctx.guild.id
+    if guild_id in queues and queues[guild_id]:
+        queue_list = ""
+        for index, audio_url in enumerate(queues[guild_id]):
+            try:
+                ydl_opts = {
+                    'quiet': True,
+                    'skip_download': True,
+                    'extract_flat': True,
+                }
+                with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(audio_url, download=False)
+                    title = info.get('title', 'Desconhecido')
+                queue_list += f"{index + 1}. {title}\n"
+            except Exception as e:
+                queue_list += f"{index + 1}. Desconhecido\n"
+        
+        embed = discord.Embed(title="Lista de músicas na fila", description=queue_list, color=discord.Color.blue())
+        await ctx.send(embed=embed)
+    else:
+        await ctx.send("Não há músicas na fila.")
+
+
 bot.run("MTI0ODM2NTUyNzI2MTI1MzcyMw.G0oyAA.41Pdmej82LOkdfKUILwGXSO-cq7G0I6Y2sBdOw")
