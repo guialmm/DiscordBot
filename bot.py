@@ -1,11 +1,13 @@
-import discord  
+import discord
 import random
+import youtube_dl
 from discord.ext import commands
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.voice_states = True
 
-bot = commands.Bot(command_prefix = "!", intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 pessoa = 383979046507249675
 emoji_macaco = "🐵"
@@ -41,16 +43,14 @@ async def dado(ctx, maximo: int):
 async def coinflip(ctx):
     await ctx.send(random.choice(["Cara", "Coroa"]))
 
-bot.remove_command('help')
-
+@bot.remove_command('help')
 @bot.command(aliases=['ajuda'])
 async def help(ctx):
-    MyEmbed = discord.Embed(title="Comandos do Bot", description="Lista de comandos disponíveis", color = discord.Color.dark_purple())
+    MyEmbed = discord.Embed(title="Comandos do Bot", description="Lista de comandos disponíveis", color=discord.Color.dark_purple())
     MyEmbed.add_field(name="!ping", value="Retorna Pong!", inline=False)
     MyEmbed.add_field(name="!dado <maximo>", value="Rola um dado do número máximo que você escolhe", inline=False)
     MyEmbed.add_field(name="!coinflip", value="Joga uma moeda", inline=False)
-    clear_aliases = ', '.join(['!'+alias for alias in bot.get_command('clear').aliases])
-    MyEmbed.add_field(name=f"!clear <quantidade> (Outros comandos: {clear_aliases})", value="Apaga a quantidade de mensagens que você escolher", inline=False)
+    MyEmbed.add_field(name="!clear <quantidade>", value="Apaga a quantidade de mensagens que você escolher", inline=False)
     MyEmbed.add_field(name="!edit servername <nome>", value="Altera o nome do servidor", inline=False)
     MyEmbed.add_field(name="!kick <membro> <motivo>", value="Expulsa um membro do servidor", inline=False)
     MyEmbed.add_field(name="!ban <membro> <motivo>", value="Bane um membro do servidor", inline=False)
@@ -62,12 +62,11 @@ async def help(ctx):
     MyEmbed.add_field(name="!voicekick <membro>", value="Expulsa um membro do canal de voz", inline=False)
     await ctx.send(embed=MyEmbed)
 
-
 @bot.command(aliases=['limpar', 'apagar'])
 @commands.has_permissions(manage_messages=True)
 async def clear(ctx, quantidade: int):
     if quantidade < 1 or quantidade > 100:
-        await ctx.send("O limite de mensagens foi atingido, só consigo apagar entre 1 e 500 mensagens por vez.")
+        await ctx.send("O limite de mensagens foi atingido, só consigo apagar entre 1 e 100 mensagens por vez.")
         return
     quantidade = min(quantidade, 100)
     await ctx.send(f"Apagando o chat em {quantidade} mensagens...")
@@ -131,39 +130,25 @@ async def unban(ctx, *, member=None):
         return
 
     try:
-        banned_users = [entry async for entry in ctx.guild.bans()]  # Convert async generator to list
-        
-        if not banned_users:
-            await ctx.send("Não há usuários banidos.")
-            return
-
-        member = member.lower().strip()
-        
-        # Check if member is a mention
-        if member.startswith("<@") and member.endswith(">"):
-            member = member[2:-1]
-            if member.startswith("!"):
-                member = member[1:]
+        banned_users = await ctx.guild.bans()
+        member_name, member_discriminator = member.split('#')
 
         for ban_entry in banned_users:
             user = ban_entry.user
 
-            if str(user.id) == member or user.name.lower() == member:
+            if (user.name, user.discriminator) == (member_name, member_discriminator):
                 await ctx.guild.unban(user)
-                await ctx.send(f"{user.name} (ID: {user.id}) foi desbanido do servidor.")
+                await ctx.send(f"{user.name}#{user.discriminator} foi desbanido do servidor.")
                 return
 
-        await ctx.send(f"Não foi possível desbanir {member}. Usuário não encontrado na lista de banidos.")
+        await ctx.send(f"{member} não foi encontrado na lista de banidos.")
     except Exception as e:
-        await ctx.send(f"Ocorreu um erro ao tentar desbanir {member}. Tente utilizar o comando neste formato: '!unban <ID do usuário ou nome do usuário>'. Se o problema persistir, verifique se o ID ou o nome de usuário estão corretos e tente novamente.")
+        await ctx.send(f"Ocorreu um erro ao tentar desbanir {member}.")
 
 @unban.error
 async def unban_error(ctx, error):
     if isinstance(error, commands.MissingPermissions):
         await ctx.send("Você não tem permissão para executar esse comando.")
-    else:
-        await ctx.send("Ocorreu um erro ao tentar desbanir. Tente utilizar o comando neste formato: '!unban <ID do usuário ou nome do usuário>'. Se o problema persistir, verifique se o ID ou o nome de usuário estão corretos e tente novamente.")
-
 
 @bot.command()
 @commands.has_permissions(ban_members=True)
@@ -240,5 +225,78 @@ async def voicekick_error(ctx, error):
     if isinstance(error, commands.MissingPermissions):
         await ctx.send("Você não tem permissão para executar esse comando.")
 
+@bot.command()
+async def join(ctx):
+    if ctx.author.voice is None:
+        await ctx.send("Você não está conectado a um canal de voz.")
+        return
+    
+    channel = ctx.author.voice.channel
+    await channel.connect()
+    await ctx.send(f"Conectado ao canal: {channel.name}")
 
-bot.run("MTI0ODM2NTUyNzI2MTI1MzcyMw.G-ga0y.lbzit-u297Qs7FWxUVfyyigCvOy8pA19c_lnfs")
+@bot.command()
+async def leave(ctx):
+    if ctx.voice_client is None:
+        await ctx.send("Não estou conectado a nenhum canal de voz.")
+        return
+    
+    await ctx.voice_client.disconnect()
+    await ctx.send("Desconectado do canal de voz.")
+
+'''
+@bot.command()
+async def play(ctx, *, searchword):
+    voice = ctx.voice_client
+
+    if searchword[0:4] == "http" or searchword[0:3] == "www":
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+            'verbose': True  # Adiciona o modo verboso
+        }
+        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(searchword, download=False)
+    else:
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+            'default_search': 'ytsearch',
+            'verbose': True  # Adiciona o modo verboso
+        }
+        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(searchword, download=False)['entries'][0]
+
+    title = info['title']
+    url = info["webpage_url"]
+    
+    ydl_opts["outtmpl"] = f"{title}.mp3"
+
+    with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
+
+    if voice.is_playing():
+        queue.append(title)
+        await ctx.send(f"{title} foi adicionado à fila.")
+    else:
+        voice.play(discord.FFmpegPCMAudio(f"{title}.mp3"), after=lambda e: check_queue())
+        await ctx.send(f"Tocando {title}")
+        
+    def check_queue():
+        try:
+            if queuelist[0] != None:
+                voice.play(discord.FFmpegPCMAudio(f"{queuelist[0]}.mp3"), after=lambda e: check_queue())
+                queuelist.pop(0)
+        except IndexError:
+            return
+'''
+            
+bot.run("MTI0ODM2NTUyNzI2MTI1MzcyMw.G0oyAA.41Pdmej82LOkdfKUILwGXSO-cq7G0I6Y2sBdOw")
