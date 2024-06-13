@@ -352,4 +352,4 @@ async def queue(ctx):
         await ctx.send("Não há músicas na fila.")
 
 
-bot.run("MTI0ODM2NTUyNzI2MTI1MzcyMw.G0oyAA.41Pdmej82LOkdfKUILwGXSO-cq7G0I6Y2sBdOw")
+bot.run("seu_token")
